@@ -1,0 +1,13 @@
+short_title,quandl_code,fred_code,transform_code,slow_move_code,description
+ISM-ManProd,ISM/MAN_PROD,NAPMPI,1,1,ISM Manufacturing: Production Index
+ISM-ManBack,ISM/MAN_BACKLOG,NAPMBI,1,1,ISM Manufacturing: Backlog of Orders Index
+ISM-ManEmp,ISM/MAN_EMPL,NAPMEI,1,1,ISM Manufacturing: Employment Index
+ISM-ManNewO,ISM/MAN_NEWORDERS,NAPMNOI,1,1,ISM Manufacturing: New Orders Index
+ISM-ManPrice,ISM/MAN_PRICES,NAPMPRI,1,1,ISM Manufacturing: Prices Index
+ISM-NMActivity,FRED/NMFBAI,NMFBAI,1,1,ISM Non-manufacturing: Business Activity Index
+ISM-NMBack,ISM/NONMAN_BACKLOG,NMFBI,1,1,ISM Non-manufacturing: Backlog of Orders Index
+ISM-NMEmp,ISM/NONMAN_EMPL,NMFEI,1,1,ISM Non-manufacturing: Employment Index
+ISM-NMNewO,ISM/NONMAN_NEWORD,NMFNOI,1,1,ISM Non-manufacturing: New Orders Index
+ISM-NMPrice,FRED/NMFPI,NMFPI,1,1,ISM Non-manufacturing: Prices Index
+S&P500PE,MULTPL/SP500_PE_RATIO_MONTH,SP500-PE,4,0,S&P 500 Price Earnings Ratio
+S&P500DIV,MULTPL/SP500_DIV_YIELD_MONTH,SP500-DIV,4,0,s&p 500 Dividend Yield

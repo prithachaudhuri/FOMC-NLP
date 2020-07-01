@@ -1,0 +1,78 @@
+short_title,fred_code,transform_code,slow_move_code,description
+BBD,USEPUINDXM,4,0,Economic Policy Uncertainty Index for United States
+RealHP,CSUSHPINSA,5,1,Case-Shiller Real House Price index
+SoldHouses,HSN1F,5,1,New One Family Houses Sold: United States
+NomHP,MSPNHSUS,5,1,Median Sales Price for New Houses Sold in the United States
+IP,INDPRO,5,1,Industrial Production Index
+IP-BusEq,IPBUSEQ,5,1,Industrial Production: Business Equipment
+IP-DurC,IPDCONGD,5,1,Industrial Production: Durable Consumer Goods
+IP-DurMat,IPDMAT,5,1,Industrial Production: Durable Materials
+IP-DurMotor,IPG3361S,5,1,Industrial Production: Durable Goods: Motor vehicle
+IP-Man,IPMAN,5,1,Industrial Production: Manufacturing (NAICS)
+IP-Mat,IPMAT,5,1,Industrial Production: Materials
+IP-NdurCons,IPNCONGD,5,1,Industrial Production: Nondurable Consumer Goods
+CapU,TCU,5,1,Capacity Utilization: Total Industry
+CapUMan,MCUMFN,5,1,Capacity Utilization: Manufacturing (NAICS)
+CapU-ManDur,CAPUTLGMFDS,5,1,Capacity Utilization: Durable manufacturing
+M1,M1SL,5,1,M1 Money Stock
+M2,M2SL,5,1,M2 Money Stock
+MB,AMBSL,5,1,St. Louis Adjusted Monetary Base
+ExcReserves,EXCSRESNS,5,0,Excess Reserves of Depository Institutions
+OilPrice,MCOILWTICO,5,0,"Crude Oil Prices: West Texas Intermediate (WTI) - Cushing, Oklahoma"
+GasPrice,MHHNGSP,5,0,Henry Hub Natural Gas Spot Price
+ISM-ManProd,NAPMPI,1,1,ISM Manufacturing: Production Index
+ISM-ManBack,NAPMBI,1,1,ISM Manufacturing: Backlog of Orders Index
+ISM-ManEmp,NAPMEI,1,1,ISM Manufacturing: Employment Index
+ISM-ManNewO,NAPMNOI,1,1,ISM Manufacturing: New Orders Index
+ISM-ManPrice,NAPMPRI,1,1,ISM Manufacturing: Prices Index
+ISM-NMActivity,NMFBAI,1,1,ISM Non-manufacturing: Business Activity Index
+ISM-NMBack,NMFBI,1,1,ISM Non-manufacturing: Backlog of Orders Index
+ISM-NMEmp,NMFEI,1,1,ISM Non-manufacturing: Employment Index
+ISM-NMNewO,NMFNOI,1,1,ISM Non-manufacturing: New Orders Index
+ISM-NMPrice,NMFPI,1,1,ISM Non-manufacturing: Prices Index
+Lab-EmpTot,PAYEMS,5,1,All Employees: Total nonfarm
+Lab-EmpCons,USCONS,5,1,All Employees: Construction
+Lab-EmpGoods,USGOOD,5,1,All Employees: Goods-Producing Industries
+Lab-EmpSer,SRVPRD,5,1,All Employees: Service-Providing Industries
+Lab-AvH,CEU0500000007,5,1,Average Weekly Hours of Production and Nonsupervisory Employees: Total Private
+Unemployment rate,UnRate,4,1,Unemployment Rate
+P-CED,PCEPI,5,1,Personal Consumption Expenditures: Chain-type Price Index
+PPI-all,PPIACO,5,1,Producer Price Index for All Commodities
+PPI-Cons,PPIFCG,5,1,Producer Price Index by Commodity for Finished Consumer Goods
+PPI-Finished,PPIFGS,5,1,Producer Price Index by Commodity for Finished Goods
+PPI-FinishLessEnergy,PPILFE,5,1,Producer Price Index by Commodity for Finished Goods Less Food & Energy
+CPI-all,CPIAUCSL,5,1,Consumer Price Index for All Urban Consumers: All Items
+CPI-apparel,CPIAPPSL,5,1,Consumer Price Index for All Urban Consumers: Apparel
+CPI-Medical,CPIMEDSL,5,1,Consumer Price Index for All Urban Consumers: Medical Care
+CPI-trans,CPITRNSL,5,1,Consumer Price Index for All Urban Consumers: Transportation
+USD-Can,EXCAUS,5,0,Canada - U.S. Foreign Exchange Rate
+USD-China,EXCHUS,5,0,China - U.S. Foreign Exchange Rate
+USD-Jap,EXJPUS,5,0,Japan - U.S. Foreign Exchange Rate
+USD-Mex,EXMXUS,5,0,Mexico - U.S. Foreign Exchange Rate
+USD-Swiss,EXSZUS,5,0,Switzerland - U.S. Foreign Exchange Rate
+USD-UK,EXUSUK,5,0,U.S. - U.K. Foreign Exchange Rate
+USD-TWI,TWEXBMTH,5,0,Trade Weighted U.S. Dollar Index: Broad
+USD-TWImajor,TWEXMMTH,5,0,Trade Weighted U.S. Dollar Index: Major Currencies
+RPDIpc,A229RX0,5,1,Real Disposable Personal Income: Per capita
+RPDI,W875RX1,5,1,Real personal income excluding current transfer receipts
+TotalLoans,TOTALSL,5,1,"Total Consumer Credit Owned and Securitized, Outstanding"
+Michigam,UMCSENT,1,1,University of Michigan: Consumer Sentiment
+SP500,SP500,5,0,S&P500 Equity Index
+SP500-PE,SP500-PE,4,0,S&P500 PE ratio
+NASDAQ,NASDAQCOM,5,0,NASDAQ Composite Index
+EquityIndex-Wilson,WILL5000INDFC,5,0,Wilshire 5000 Total Market Full Cap Index
+Vix,VIXCLS,4,0,CBOE Volatility Index: VIX
+1yrYield,GS1,1,0,1-Year Treasury Constant Maturity Rate
+10yrYield,GS10,1,0,10-Year Treasury Constant Maturity Rate
+3yrYield,GS3,1,0,3-Year Treasury Constant Maturity Rate
+3mYield,GS3M,1,0,3-Month Treasury Constant Maturity Rate
+5yrYield,GS5,1,0,5-Year Treasury Constant Maturity Rate
+aaaYield,AAA,1,0,Moody’s Seasoned Aaa Corporate Bond Yield
+baaYield,BAA,1,0,Moody’s Seasoned Baa Corporate Bond Yield
+SprAAA-10y,AAA10YM,1,0,Moody’s Seasoned Aaa Corporate Bond Yield Relative to Yield on 10-Year Treasury
+SprBAA-10y,BAA10YM,1,0,Moody’s Seasoned Baa Corporate Bond Yield Relative to Yield on 10-Year
+Spr10y-2y,T10Y2YM,1,0,10-Year Treasury Constant Maturity Minus 2-Year Treasury Constant Maturity
+Spr10y-3 m,T10Y3MM,1,0,10-Year Treasury Constant Maturity Minus 3-Month Treasury Constant Maturity
+Spr10y-ffr,T10YFFM,1,0,10-Year Treasury Constant Maturity Minus Federal Funds Rate
+Spr3m-ffr,TB3SMFFM,1,0,3-Month Treasury Bill Minus Federal Funds Rate
+Fedfunds,FEDFUNDS,1,0,Effective Federal Funds Rate

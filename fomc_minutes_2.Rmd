@@ -1,0 +1,820 @@
+---
+title: "Federal Reserve's Unconventional Monetary Policy"
+author: "Pritha Chaudhuri"
+date: "6/9/2020"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+<style> p.caption {font-weight: bold;} </style>
+
+<div style="margin-bottom:100px;">
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, cache = FALSE)
+```
+
+```{r, echo=FALSE}
+library(pacman) # package to install and load packages with one command
+p_load(tidyverse,lubridate,xml2,rvest,tidytext,topicmodels,ggplot2,
+       tm,SnowballC,wordcloud,doParallel,stargazer,fredr,Quandl,vars,forecast, extrafont,Matrix,MCMCpack)
+set.seed(123)
+select <- dplyr::select
+source("bayesian_var.R")
+
+# font_import()
+# loadfonts(device = "win")
+# Create own theme for ggplot2
+theme_pri <- function(){
+  theme(
+    # 1. Border
+    panel.border = element_rect(fill = NA, color = "black", linetype = "solid", size = 1),
+    # 2. Background
+    panel.background = element_rect(fill = NA),
+    # 3. Grid lines
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    # 4. Text
+    text = element_text(color = "black", size = 10, family = "serif"),
+    # 5. Axis 
+    axis.line = element_line(color = "black"),
+    axis.ticks = element_line(color = "black"),
+    # axis.text = element_text(),
+    # axis.title = element_text(),
+    # 6. Legend 
+    legend.title = element_blank(),
+    legend.position = "bottom"
+  )
+}
+
+```
+
+This file conducts topic modelling on FOMC meeting minutes and uses that to create an unconventional monetary policy index. Then the index is used to study the effects on economic and financial variables in a FAVAR framework. For this analysis the sample period is 1993-2019. 
+
+## FOMC Meeting Minutes
+The FOMC meeting minutes are extracted from the [Federal Reserve website](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm). The following code shows how the documents were extracted using the minute URLs.
+```{r, eval=FALSE}
+## Extract FOMC minutes from web 
+# Get dates and minutes URL from csv file
+dates <- read.csv("data/minurl.csv") %>%
+  mutate(mdate=ymd(mdate),url=as.character(url))
+
+# Minutes url changes over time
+# First part of minutes include names of FOMC members and those attending meeting
+# Using selector gadget find nodes to select part of page needed
+dates <- dates%>%
+  mutate(year = as.numeric(year(dates$mdate)),
+         node1 = "blockquote , table~ p",
+         node2 = "p",
+         node3 = "blockquote~ p , blockquote p , p:nth-child(31)")
+
+# Function extracts text from URl and nodes
+# Returns error if above nodes don't work
+getFomc <- function(mdate,url,node1,node2){
+  x <- html_nodes(read_html(url),node1)
+  if (length(x)>=1){#good
+  }else{
+    x <- html_nodes(read_html(url),node2)
+    if (length(x)>=1) {
+      #good
+    }else{cat('Check node for url:',url)}
+  }
+  x <- html_text(x)
+  return(tibble(date=mdate,text=x))
+}
+
+# Creating corpus  
+fomc_corp <- tibble()
+for(i in 1:nrow(dates)){
+  cat(i,'/',nrow(dates),'\n')
+  fomc_corp <- bind_rows(fomc_corp,getFomc(dates$mdate[i],dates$url[i],dates$node1[i],dates$node2[i]))
+}
+```
+
+```{r, echo=FALSE}
+fomc_corp <- read.csv("fomc1993_2019.csv")
+
+# head(fomc_corp)
+```
+
+### Data Preprocessing
+The FOMC corpus is tokenized at the word level (as unigrams). Pre-processing the corpus includes removing stopwords, such as "a", "an", "the" or other commonly used words that appear regularly in a corpus. The list is the 'stop_words' data frame included in the tidytext package. To this list I add my own list of non-useful words, that appear often in a FOMC statement but are not meaningful to build topics. Some of these words include "month", "quarter", "chairman", "system", etc. Numbers and blank spaces are also removed. Words are then stemmed using the Porter algorithm, reducing words to their common root (for example, "accommodation" and "accommodate" both become "accommod"). Pre-processing the corpus is done to obtain more meaningful topics. 
+```{r}
+# tokenize corpus at word level (unigram)
+fomc_word <- fomc_corp %>%
+  unnest_tokens(output = word,
+                input = text,
+                token = 'words')
+
+# Function to pre-process corpus to get more meaningful topics
+clean_text <- function(fomc_word){
+  
+  # remove punctuation
+  fomc_word <- fomc_word %>% 
+    mutate(word = gsub("[[:punct:]]","",word)) %>% 
+    filter(word != "")
+  
+  # remove numbers
+  fomc_word <- fomc_word %>% 
+    mutate(word = gsub("[[:digit:]]+","",word)) %>% 
+    filter(word != "")
+  
+  # Remove stop words, list comes from tidytext data frame
+  # Some other non-useful words added to list of stopwords
+  new_stop_words <- stop_words
+  nonuseful_words <- c("month", "year", "quarter", "period", "january", "february", "march",
+                       "april", "may", "june", "july", "august", "september", "october", 
+                       "november", "december", "system", "reserve", "participants", "open",
+                       "chairman", "federal", "also", "meeting", "FOMC", "-", "\r", "\n", 
+                       ".", "york", "a.m", "i.e.", "i.", "ii.", "ii", "greenspan",
+                       "iv")
+  nonuseful_words <- tibble(word = nonuseful_words)
+  new_stop_words <- bind_rows(new_stop_words, nonuseful_words)
+  
+  fomc_word <- anti_join(fomc_word, new_stop_words, by = 'word')
+  
+  
+  # stem words using Porter algorithm, SnowballC package
+  fomc_word_stem <- wordStem(fomc_word$word, language = "porter")
+  fomc_word_stem <- tibble(date = fomc_word$date,
+                           word = fomc_word_stem)
+  
+  fomc_word_final <- anti_join(fomc_word_stem, new_stop_words, by = "word") %>% filter(word != "")
+  
+  return(fomc_word_final)
+}
+
+# count words by each document
+fomc_word_final <- clean_text(fomc_word) %>% 
+  group_by(date, word) %>% 
+  summarise(n = n()) %>% 
+  ungroup()
+```
+
+The final corpus is at the document-word level, including a count of each word in each document. 
+```{r, echo=F}
+head(fomc_word_final)
+```
+
+### Topic Modelling {.tabset}
+To extract topics from FOMC minutes I use LDA algorithm. The corpus needs to be cast into a document-term-matrix format. The LDA algorithm provides 2 measures: $\beta$ measuring frequency of each word in a topic and $\gamma$ the frequency of each topic in a document. I arbitrarily select the number of topics to estimate as 10 for now. In the future, I will use cross-validation to pick the optimum number of topics. 
+
+```{r}
+# Create Document-term matrix for LDA
+fomc_dtm <- cast_dtm(fomc_word_final, document = date, term = word, value = n)
+
+# Select arbitrary number of topics for now
+# Later will use cross-validation to obtain the optimum number of topics 
+topics <- 10
+
+# Run LDA 
+# Get word frequency by topic (beta) and topic frequency by document (gamma) in tidy format
+fomc_lda <- LDA(fomc_dtm, topics, method = "Gibbs")
+topics_beta <- tidy(fomc_lda, matrix = "beta")
+topics_gamma <- tidy(fomc_lda, matrix = "gamma")
+
+# Top 20 words in each topic
+top_terms <- topics_beta %>% 
+  group_by(topic) %>% 
+  top_n(20, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta)
+```
+
+#### Top 10 words in each topic
+```{r}
+topics_beta %>% 
+  group_by(topic) %>% 
+  top_n(10, beta) %>% 
+  ungroup() %>% 
+  arrange(topic, -beta) %>% 
+  mutate(term = reorder_within(term, beta, topic)) %>% 
+  ggplot(aes(term, beta, fill = factor(topic))) + 
+  geom_col(show.legend = F, color = "black") + 
+  theme_pri() + 
+  facet_wrap(~topic, scales = 'free', ncol = 5) + 
+  coord_flip() + 
+  scale_x_reordered() + 
+  xlab("Terms") + 
+  ylab("Beta") + 
+  scale_fill_brewer(palette = "Set3")
+ggsave("figures/top10words.pdf")
+```
+
+
+#### Topic proportions over time
+```{r}
+topics_gamma %>% 
+  mutate(year = year(document)) %>% 
+  group_by(year, topic) %>% 
+  summarise(gamma = mean(gamma)) %>% 
+  ggplot(aes(year, gamma, fill = factor(topic))) + 
+  geom_area(position = 'stack') +
+  # geom_vline(xintercept = 2009)+
+  facet_wrap(~topic, ncol = 5) +
+  theme_pri() +
+  theme(legend.position = "none") + 
+  xlab("Meetings") + 
+  ylab("Gamma") + 
+  scale_fill_brewer(palette = "Set3")
+ggsave("figures/topicprops.pdf")
+```
+
+It seems like several topics spiked around different QE programs. Taking a closer look at some of these topics. 
+
+#### Topic 1
+```{r}
+# brewer.pal(n = 12, name = "Set3")
+#  [1] "#8DD3C7" "#FFFFB3" "#BEBADA" "#FB8072" "#80B1D3"
+#  [6] "#FDB462" "#B3DE69" "#FCCDE5" "#D9D9D9" "#BC80BD"
+# [11] "#CCEBC5" "#FFED6F"
+
+#  brewer.pal(n = 11, name = "PRGn")
+# [1] "#A6CEE3" "#1F78B4" "#B2DF8A" "#33A02C" "#FB9A99"
+#  [6] "#E31A1C" "#FDBF6F" "#FF7F00" "#CAB2D6" "#6A3D9A"
+# [11] "#FFFF99"
+
+topics_gamma %>% 
+  filter(topic %in% c(1)) %>% 
+  mutate(doc = as.Date.character(document, tryFormats = "%Y-%m-%d")) %>% 
+  ggplot(aes(doc, gamma, group = 1)) + 
+  geom_line(linetype = "solid", color = "#A6CEE3", size = 1, show.legend = F) +
+  # geom_vline(xintercept = 2009, size = 0.25) +
+  theme_pri() +
+  xlab("Meetings") +
+  ylab("Proportion of Document") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%y")
+ggsave("figures/topic1props.pdf")
+```
+
+#### Topic 10
+```{r}
+topics_gamma %>% 
+  filter(topic %in% c(10)) %>% 
+  mutate(doc = as.Date.character(document, tryFormats = "%Y-%m-%d")) %>% 
+  ggplot(aes(doc, gamma, group = 1)) + 
+  geom_line(linetype = "solid", color = "#1F78B4", size = 1, show.legend = F) +
+  # geom_hline(yintercept = 0.0, size = 0.25, linetype = "dashed") +
+  theme_pri() +
+  xlab("Meetings") +
+  ylab("Proportion of Document") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%y") 
+ggsave("figures/topic10props.pdf")
+```
+
+### Unconventional Policy Index 
+This index measures how much of each FOMC meeting was dedicated to discussing the Fed's uncomventional monetary policies, like the LSAP program or forward guidance. Using the $\beta$ and $\gamma$ measures from LDA I can calculate the fraction of each document dedicated to LSAP and FG.
+
+#### Word prop by topics
+To do this first I make a list of 12 most common words that are associated with unconventional policy. Then using the $\beta$ matrix I calculate the proportion of each topic that is explained by the above list of words $\theta^i$ as follows 
+
+$$ \theta^i = \beta^i_1 + \beta^i_2 + \cdots + \beta^i_{12} $$
+
+where $\beta^i_1$ is the proportion of word 1 in topic $i$ and so on.
+
+```{r}
+# List of words often used for unconventional policy such as LSAP
+index_words <- c("treasury", "agency", "mortgage", "maturity", "financial","accommodation",
+                 "credit", "asset", "purchase", "balance", "sheet", "housing")
+# Stem words using Porter algorithm
+index_words_stem <- wordStem(index_words, language = "porter")
+index_words_stem <- tibble(word = index_words_stem)
+
+# Prop of each topic that is explained by above list of words
+index_beta <- inner_join(topics_beta, index_words_stem, by = c("term" = "word")) %>% 
+  group_by(topic) %>% 
+  summarise(prop = 100*sum(beta))
+
+index_beta %>% arrange(desc(prop))
+
+stargazer(arrange(index_beta, desc(prop)), type = "text", summary = F, rownames = F)
+```
+Above results show these words make up 11.70% of topic 10 and 10.26% of topic 1. 
+
+#### Top 20 words 
+```{r}
+top_terms %>% 
+  filter(topic %in% c(1,10)) %>%
+  mutate(term = reorder_within(term, beta, topic)) %>% 
+  ggplot(aes(term, beta, fill = factor(topic))) + 
+  geom_col(show.legend = F, color = "black") + 
+  scale_fill_brewer(palette = "Paired") +
+  facet_wrap(~topic, scales = 'free', ncol = 2) + 
+  coord_flip() + 
+  scale_x_reordered() +
+  theme_pri() + 
+  labs(x = NULL, y = "Word proportions")
+ggsave("figures/topicwordprops.pdf")
+```
+
+Looking at the proportion of these topics and the top 20 words in these topics, I conclude that topics 1 and 10 correspond to Fed's unconventional policies. 
+
+#### Index
+I will use topic 1 and 10 proportions for each document ($\gamma$s) and the word proportions created above ($\theta$s) to create the share of each document $d$ (or meeting) dedicated to LSAP and FG as
+ 
+$$ \text{Index}_d = \gamma^3_d\theta^3 + \gamma^8_d\theta^8 + \gamma^{10}_d\theta^{10} $$
+
+```{r}
+index_lsap <- topics_gamma %>% 
+  arrange(document) %>%
+  left_join(index_beta, by = "topic") %>% 
+  filter(topic %in% c(1,10)) %>% 
+  group_by(document) %>% 
+  summarise(indexlsap = sum(gamma*prop)) %>%
+  mutate(doc = as.Date.character(document, tryFormats = "%Y-%m-%d"),
+         year = year(doc), 
+         month = month(doc))
+
+#  brewer.pal(n = 9, name = "Blues")
+# [1] "#F7FBFF" "#DEEBF7" "#C6DBEF" "#9ECAE1" "#6BAED6"
+# [6] "#4292C6" "#2171B5" "#08519C" "#08306B"
+
+index_lsap %>% 
+  ggplot(aes(doc, indexlsap, group = 1)) +
+  geom_line(linetype = "solid", color = "#08306B", size = 1, show.legend = F) +
+  theme_pri() +
+  xlab("Meetings") +
+  ylab("") +
+  scale_x_date(date_breaks = "2 years", date_labels = "%y")
+ggsave("figures/Index.pdf")
+```
+
+## Analysis
+The analysis is done in 2 parts. First I validate the unconventional policy index by studying its impact on long-term rates. A true measure of Fed's unconventional policy will reduce long-term rates. Next I analyze the effect of unconventional monetary policy on macroeconomic and financial variables in a FAVAR framework. 
+
+### Data
+The macroeconomic and financial variables used in the analysis is the same as Bernanke et al (2005), also used by Hansen et al (2016) in their FAVAR analysis. The data spans the year 1993-2019 and contains 78 indicators. 
+
+The data is obtained from FRED and Quandl. I have a list of FRED codes and Quandl codes for all the variables of interest. Using this list and API key I can extract data from the websites directly. The data is then combined and the variables are transformed according to the following transformation codes
+
+* 1: no transformation
+* 2: first difference
+* 4: log
+* 5: first difference of log
+
+The unconventional policy index is then added to this data. Note that since there are only 8 FOMC meetings each year, there are months where no meetings are held and the index has no value. For these months I use the last FOMC meeting value. The corresponding data is saved as the 'favardata' dataset. 
+
+```{r}
+favardata <- read.csv("data/favardata.csv")
+transform_codes <- read.csv("data/transform_codes.csv")
+description <- read.csv("data/description.csv") 
+
+head(favardata)
+```
+
+**Impute missing values**
+Several indicators have missing values. I use the na.interp() function from the forecast package to impute missing values. This is a linear interpolation process for non-seasonal time series and periodic stl decomposition for seasonal time series. 
+
+```{r}
+# indicators to impute
+impute <- c("EXMXUS", "MHHNGSP", "NMFBAI", "NMFBI", "NMFEI", "NMFNOI", "NMFPI",
+            "PPIFCG", "PPIFGS", "PPILFE", "AMBSL")
+tsfavardata <- ts(favardata, start = 1993, frequency = 12)
+
+for (i in impute) {
+  tsfavardata[,i] <- na.interp(tsfavardata[,i])
+}
+
+# Check if any more NAs exist
+# sapply(tsfavardata, function(x) sum(is.na(x)))
+```
+
+### Time Series Regression
+To test that the index is a measure of unconventional policy, I can study its impact on the 10-year treasury rate. This can be done through a simple time-series regression of the form 
+
+$$ i^{10}_t = \alpha*\text{Index}_t + X_t\delta + \epsilon_t $$
+
+where $i^{10}_t$ is the 10-year Treasury rate. $\alpha$ is the coefficient of interest as it measures the effect of the index on the 10-year Treasury. $X_t$ is a list of controls that include industrial production, 12-month change in core CPI for an inflation measure and unemployment rate. For the short-term interest rate measure I use three different rates: the Federal Funds Rate, the 3-month Treasury rate and the 1-year Treasury rate.
+
+```{r}
+# Function to run time series regression
+run_tsreg <- function(y,x,data){
+  form <- as.formula(paste0(y,"~",paste(x, collapse = "+")))
+  # tslm <- tslm(form, data)
+  tslm <- lm(form,data)
+  
+  return(tslm)
+}
+
+regdata <- as.data.frame(tsfavardata) %>% 
+  select("INDPRO", "CPIAUCSL", "UnRate", "index_lsap", "FEDFUNDS", "GS1", "GS3M", "GS10", "year", "month")
+
+# Regression of Index on GS10 only
+index.result <- run_tsreg("GS10", c("index_lsap", "FEDFUNDS"), regdata)
+regdata$index.pred <- predict(index.result, regdata)
+
+tslm.results <- list()
+xvars <- c("INDPRO", "CPIAUCSL", "UnRate", "index_lsap")
+strates <- c("FEDFUNDS", "GS1", "GS3M")
+tslm.results <- lapply(strates, function(x) run_tsreg("GS10", c(xvars,x), regdata) )
+regdata$ffr.pred <- predict(tslm.results[[2]], regdata)
+
+stargazer(index.result, tslm.results, type = "text")
+```
+
+1. If the index is only regressed on the long-term rate, an increase in unconventional policy reduces long-term rate by almost 0.4 pp.
+2. A one unit increase in the unconventional policy index reduces the 10-year Treasury by approx. 0.24 percentage points (significant at the 1% level). Results are similar for other short-term rates. 
+
+**Actual vs Fitted values**
+```{r}
+regdata %>% 
+  mutate(ym = make_date(year, month)) %>% 
+  select(ym, GS10, index.pred) %>% 
+  gather("series", "value", -"ym") %>% 
+  ggplot(aes(ym, value, color = series, group = series)) + 
+  geom_line(size = 1) + 
+  xlab("Year") + ylab("") + 
+  ggtitle("Actual vs Fitted Values") + 
+  scale_x_date(date_breaks = "3 years", date_labels = "%b-%y") +
+  theme_pri()
+```
+
+Comparing the 10-year Treasury rate (GS10) with predicted values from specification (2) above, I find that the predicted value tracks the 10-year rate closely and is able to capture the movement of the rate. 
+
+Overall, it is safe to say that the unconventional policy index validation is successful as it able to clearly predict the movement of the long-term rate. I also find the desired effect of unconventional policy on the long-term rate, where increase in unconventional policy lowers the rate, which is what the Fed intended in the first place.
+
+### Factor Augmented Vector Autoregression
+Following Bernanke et al (2005) I implement a FAVAR model where the central bank only observes the Federal Funds Rate and the unconventional monetary policy index and a set of noisy macroeconomic and financial indicators. The system can be represented as 
+
+$$\begin{bmatrix} F_t \\ Y_t \end{bmatrix} = \Phi(L) \begin{bmatrix} F_{t-1} \\ Y_{t-1} \end{bmatrix} + \nu_t $$
+
+where $Y_t$ are the observed variables, the Federal funds rate and the index. $F_t$ are unobserved factors that drive the dynamics of the macroeconomic and financial variables $X_t$ through the following observation equation
+
+$$ X_t=\Lambda^F F_t + \Lambda^Y Y_t + e_t$$
+If we omit the factors $F_t$ and include all indicators in $Y_t$ the system reduces to a standard VAR. But then we might omit important information or the underlying struncture of the data, leading to biased results. 
+
+In my analysis $Y_t=[FEDFUNDS_t, Index_t]$ are the 2 dimensions of monetary policy observable to the central banker. I estimate $K=3$ factors from the data $X_t$, lets denote that as $\hat{F}_t$. Now we can estimate a VAR framework 
+
+$$ Z_t = A Z_{t-1} + \nu_t $$
+where $Z_t=\begin{bmatrix} \hat{F}_t \\ Y_{t} \end{bmatrix}$, and study the dynamics of these indicators when there is a shock to $Index_t$ which measures the effect of unconventional monetary policy. 
+
+<!-- #### Standard VAR Estimate -->
+<!-- Below are results from a standard VAR. This process however does not provide interpretable confidence intervals.  -->
+
+<!-- ```{r} -->
+<!-- # Scale all variables  -->
+<!-- fvardata <- data.frame(tsfavardata) %>%  -->
+<!--   select(-ym, -year, -month)  -->
+<!--   # mutate_all(.funs = scale) -->
+
+<!-- # Remove observed variables before estimating factors -->
+<!-- fvar_unobs <- fvardata %>%  -->
+<!--   select(-FEDFUNDS, -index_lsap) -->
+
+<!-- # Using principal components to get factors and their eigen values -->
+<!-- # Estimating 3 factors from the unobserved data -->
+<!-- fvar_factors <- prcomp(fvar_unobs, rank = 3)$x -->
+<!-- fvar_eigen <- prcomp(fvar_unobs, rank = 3)$rotation -->
+
+<!-- # Combine the 3 estimated factors with Fed funds rate and index to get obs data -->
+<!-- fvar_obs <- data.frame(cbind(fvar_factors,  -->
+<!--                              fvardata$FEDFUNDS, fvardata$index_lsap)) %>%  -->
+<!--   rename("FEDFUNDS"="V4", "index_lsap"="V5") -->
+
+<!-- # Estimate VAR with 3 factors, fed funds rate and index -->
+<!-- # Compute impulse response functions -->
+<!-- fvar_impulse <- irf(VAR(ts(fvar_obs, start = 1993, frequency = 12), -->
+<!--                         p = 7,  -->
+<!--                         type = "const"), -->
+<!--                     impulse = "index_lsap",  -->
+<!--                     n.ahead = 48, -->
+<!--                     ortho = T,  -->
+<!--                     cumulative = F,  -->
+<!--                     boot = T,  -->
+<!--                     runs = 1000) -->
+
+<!-- # Compute IRF and CI, un-transform variables using codes -->
+<!-- fvar_impulse.plot <- fvar_impulse$irf$index_lsap[,-c(4:5)] %*% t(fvar_eigen) %>%  -->
+<!--   as.data.frame() %>%  -->
+<!--   mutate(tt = row_number()) %>%  -->
+<!--   gather("series_id", "impulse", -"tt") %>%  -->
+<!--   left_join(transform_codes, by = c("series_id")) %>%  -->
+<!--   group_by(series_id) %>%  -->
+<!--   mutate(impulse_trans = case_when(transform_code == 2 ~ cumsum(impulse), -->
+<!--                                    transform_code == 4 ~ exp(impulse)-1, -->
+<!--                                    transform_code == 5 ~ exp(cumsum(impulse))-1, -->
+<!--                                    TRUE ~ impulse)) %>%  -->
+<!--   ungroup() %>%  -->
+<!--   select(tt, series_id, impulse_trans) -->
+
+<!-- fvar_lower.plot <- fvar_impulse$Lower$index_lsap[,-c(4:5)] %*% t(fvar_eigen) %>%  -->
+<!--   as.data.frame() %>%  -->
+<!--   mutate(tt = row_number()) %>%  -->
+<!--   gather("series_id", "lower", -"tt") %>%  -->
+<!--   left_join(transform_codes, by = c("series_id")) %>%  -->
+<!--   group_by(series_id) %>%  -->
+<!--   mutate(lower_trans = case_when(transform_code == 2 ~ cumsum(lower), -->
+<!--                                  transform_code == 4 ~ exp(lower)-1, -->
+<!--                                  transform_code == 5 ~ exp(cumsum(lower))-1, -->
+<!--                                  TRUE ~ lower)) %>%  -->
+<!--   ungroup() %>%  -->
+<!--   select(tt, series_id, lower_trans) -->
+
+<!-- fvar_upper.plot <- fvar_impulse$Upper$index_lsap[,-c(4:5)] %*% t(fvar_eigen) %>%  -->
+<!--   as.data.frame() %>%  -->
+<!--   mutate(tt = row_number()) %>%  -->
+<!--   gather("series_id", "upper", -"tt") %>%  -->
+<!--   left_join(transform_codes, by = c("series_id")) %>%  -->
+<!--   group_by(series_id) %>%  -->
+<!--   mutate(upper_trans = case_when(transform_code == 2 ~ cumsum(upper), -->
+<!--                                  transform_code == 4 ~ exp(upper)-1, -->
+<!--                                  transform_code == 5 ~ exp(cumsum(upper))-1, -->
+<!--                                  TRUE ~ upper)) %>%  -->
+<!--   ungroup() %>%  -->
+<!--   select(tt, series_id, upper_trans) -->
+
+
+<!-- ## 3 types of indicators: yields, markets, real variables -->
+<!-- yields <- c("GS3M", "GS1", "GS3", "GS5", "GS10", "T10Y2YM", "AAA", "BAA",  -->
+<!--             "AAA10YM") -->
+<!-- markets <- c("UMCSENT", "USEPUINDXM", "VIXCLS", "SP500.PE", "NASDAQCOM", -->
+<!--              "WILL5000INDFC", "TWEXMMTH", "MHHNGSP", "MCOILWTICO") -->
+<!-- reals <- c("INDPRO", "NAPMPI", "NMFBAI", "UnRate", "NAPMEI", "NMFEI", -->
+<!--            "TCU", "CPIAUCSL", "PPIACO") -->
+
+<!-- ``` -->
+
+<!-- ##### Shock variables -->
+<!-- ```{r} -->
+<!-- fvar_shocki.plot <- fvar_impulse$irf$index_lsap[,c(4:5)] %>%  -->
+<!--   as.data.frame() %>%  -->
+<!--   mutate(tt = row_number()) %>%  -->
+<!--   gather("series_id", "impulse", -"tt")   -->
+
+<!-- fvar_shockl.plot <- fvar_impulse$Lower$index_lsap[,c(4:5)] %>%  -->
+<!--   as.data.frame() %>%  -->
+<!--   mutate(tt = row_number()) %>%  -->
+<!--   gather("series_id", "lower", -"tt") -->
+
+<!-- fvar_shocku.plot <- fvar_impulse$Upper$index_lsap[,c(4:5)] %>%  -->
+<!--   as.data.frame() %>%  -->
+<!--   mutate(tt = row_number()) %>%  -->
+<!--   gather("series_id", "upper", -"tt") -->
+
+<!-- fvar_shock.plot <- fvar_shocki.plot %>%  -->
+<!--   inner_join(fvar_shockl.plot, by = c("tt", "series_id")) %>%  -->
+<!--   inner_join(fvar_shocku.plot, by = c("tt", "series_id")) %>%  -->
+<!--   gather(type, value, -series_id, -tt) -->
+
+<!-- fvar_shock.plot %>%  -->
+<!--   ggplot(aes(tt, value, linetype = type)) +  -->
+<!--   geom_line() +  -->
+<!--   scale_linetype_manual(values = c("solid", "dotted", "dashed")) + -->
+<!--   facet_wrap(~series_id, scales = "free") +  -->
+<!--   theme_pri() -->
+
+<!-- ``` -->
+
+
+<!-- ##### Real variables -->
+<!-- ```{r} -->
+<!-- reals.plot <- fvar_impulse.plot %>%  -->
+<!--   filter(series_id %in% reals) %>%  -->
+<!--   inner_join(fvar_lower.plot, by = c("tt", "series_id")) %>%  -->
+<!--   inner_join(fvar_upper.plot, by = c("tt", "series_id")) %>%  -->
+<!--   gather(type, value, -series_id, -tt) -->
+
+<!-- reals.plot %>%  -->
+<!--   ggplot(aes(tt, value, linetype = type)) +  -->
+<!--   geom_line() +  -->
+<!--   scale_linetype_manual(values = c("solid", "dotted", "dashed")) + -->
+<!--   facet_wrap(~series_id, scales = "free") +  -->
+<!--   theme_pri() -->
+
+<!-- ``` -->
+
+<!-- ##### Markets -->
+<!-- ```{r} -->
+<!-- markets.plot <- fvar_impulse.plot %>%  -->
+<!--   filter(series_id %in% markets) %>%  -->
+<!--   inner_join(fvar_lower.plot, by = c("tt", "series_id")) %>%  -->
+<!--   inner_join(fvar_upper.plot, by = c("tt", "series_id")) %>%  -->
+<!--   gather(type, value, -series_id, -tt) -->
+
+<!-- markets.plot %>%  -->
+<!--   ggplot(aes(tt, value, linetype = type)) +  -->
+<!--   geom_line() +  -->
+<!--   scale_linetype_manual(values = c("solid", "dotted", "dashed")) + -->
+<!--   facet_wrap(~series_id, scales = "free") +  -->
+<!--   theme_pri() -->
+
+<!-- ``` -->
+
+<!-- ##### Yields -->
+<!-- ```{r} -->
+<!-- yields.plot <- fvar_impulse.plot %>%  -->
+<!--   filter(series_id %in% yields) %>%  -->
+<!--   inner_join(fvar_lower.plot, by = c("tt", "series_id")) %>%  -->
+<!--   inner_join(fvar_upper.plot, by = c("tt", "series_id")) %>%  -->
+<!--   gather(type, value, -series_id, -tt) -->
+
+<!-- yields.plot %>%  -->
+<!--   ggplot(aes(tt, value, linetype = type)) +  -->
+<!--   geom_line() +  -->
+<!--   scale_linetype_manual(values = c("solid", "dotted", "dashed")) + -->
+<!--   facet_wrap(~series_id, scales = "free") +  -->
+<!--   theme_pri() -->
+<!-- ``` -->
+
+
+#### Bayesian VAR Estimation
+Here I estimate a standard Bayesian VAR with Gibbs sampler, as described in Hansen et al(2016) and Koop and Korobilis (2010).
+```{r}
+# Do not scale
+# Scaling distorts the shock to the Index
+fvardata <- data.frame(tsfavardata) %>%
+  select(-ym, -year, -month)
+
+# Remove observed variables before estimating factors
+fvar_unobs <- fvardata %>%
+  select(-FEDFUNDS, -index_lsap)
+
+# Using principal components to get factors and their eigen values
+# Estimating 3 factors from the unobserved data
+fvar_factors <- prcomp(fvar_unobs, rank = 3)$x
+fvar_eigen <- prcomp(fvar_unobs, rank = 3)$rotation
+
+# Combine the 3 estimated factors with Fed funds rate and index to get obs data
+fvar_obs <- cbind(fvar_factors, fvardata$FEDFUNDS, fvardata$index_lsap)
+
+# Estimate BVAR using obs data
+bvar_result <- bayesian_var(data = fvar_obs,
+                            nsim = 20000,
+                            burnin = 10000,
+                            p = 7,
+                            n_hz = 48)
+# function returns a list with 5 results: coeff est, Sigma, impulse, 95 and 5 percentile for coeff estimates to calculate bands
+
+# Compute IRF, un-transform variables using codes
+bvar_impulse.plot <- bvar_result[[3]][, -c(4:5)] %*% t(fvar_eigen) %>% 
+  as.data.frame() %>% 
+  mutate(tt = row_number()) %>% 
+  gather("series_id", "impulse", -"tt") %>% 
+  left_join(transform_codes, by = c("series_id")) %>% 
+  group_by(series_id) %>% 
+  mutate(impulse_trans = case_when(transform_code == 2 ~ cumsum(impulse),
+                                   transform_code == 4 ~ exp(impulse)-1,
+                                   transform_code == 5 ~ exp(cumsum(impulse))-1,
+                                   TRUE ~ impulse),
+         sd = sd(impulse_trans), 
+         upper = impulse_trans + 1.96*sd,
+         lower = impulse_trans - 1.96*sd) %>%
+  ungroup() %>% 
+  select(tt, series_id, impulse_trans, upper, lower) 
+
+# # Confidence bands
+# # Lower band
+# bvar_lower.plot <- bvar_result[[5]][, -c(4:5)] %*% t(fvar_eigen) %>% 
+#   as.data.frame() %>% 
+#   mutate(tt = row_number()) %>% 
+#   gather("series_id", "lower", -"tt") %>% 
+#   left_join(transform_codes, by = c("series_id")) %>% 
+#   group_by(series_id) %>% 
+#   mutate(lower_trans = case_when(transform_code == 2 ~ cumsum(lower),
+#                                  transform_code == 4 ~ exp(lower)-1,
+#                                  transform_code == 5 ~ exp(cumsum(lower))-1,
+#                                  TRUE ~ lower)) %>% 
+#   ungroup() %>% 
+#   select(tt, series_id, lower_trans)
+# 
+# # Upper band
+# bvar_upper.plot <- bvar_result[[4]][, -c(4:5)] %*% t(fvar_eigen) %>% 
+#   as.data.frame() %>% 
+#   mutate(tt = row_number()) %>% 
+#   gather("series_id", "upper", -"tt") %>% 
+#   left_join(transform_codes, by = c("series_id")) %>% 
+#   group_by(series_id) %>% 
+#   mutate(upper_trans = case_when(transform_code == 2 ~ cumsum(upper),
+#                                  transform_code == 4 ~ exp(upper)-1,
+#                                  transform_code == 5 ~ exp(cumsum(upper))-1,
+#                                  TRUE ~ upper)) %>% 
+#   ungroup() %>% 
+#   select(tt, series_id, upper_trans)
+
+## 3 types of indicators: yields, markets, real variables -->
+ yields <- c("GS3M", "GS1", "GS3", "GS5", "GS10", "T10Y2YM", "AAA", "BAA", "AAA10YM") 
+ markets <- c("UMCSENT", "USEPUINDXM", "VIXCLS", "SP500.PE", "NASDAQCOM",
+              "WILL5000INDFC", "TWEXMMTH", "MHHNGSP", "MCOILWTICO")
+ reals <- c("INDPRO", "NAPMPI", "NMFBAI", "UnRate", "NAPMEI", "NMFEI",
+            "TCU", "CPIAUCSL", "PPIACO") 
+
+```
+
+##### Shock variables
+```{r}
+# bvar_shocki.plot <- bvar_result[[3]][,c(4:5)] %>% 
+#   as.data.frame() %>% 
+#   rename("FEDFUNDS"="V1", "Index"="V2") %>% 
+#   mutate(tt = row_number()) %>% 
+#   gather("series_id", "impulse", -"tt")  
+# 
+# bvar_shockl.plot <- bvar_result[[5]][,c(4:5)] %>%
+#   as.data.frame() %>%
+#   rename("FEDFUNDS"="V1", "Index"="V2") %>% 
+#   mutate(tt = row_number()) %>%
+#   gather("series_id", "lower", -"tt")
+# 
+# bvar_shocku.plot <- bvar_result[[4]][,c(4:5)] %>%
+#   as.data.frame() %>%
+#   rename("FEDFUNDS"="V1", "Index"="V2") %>% 
+#   mutate(tt = row_number()) %>%
+#   gather("series_id", "upper", -"tt")
+
+bvar_shock.plot <- bvar_result[[3]][,c(4:5)] %>% 
+  as.data.frame() %>% 
+  rename("FEDFUNDS"="V1", "Index"="V2") %>% 
+  mutate(tt = row_number()) %>% 
+  gather("series_id", "impulse", -"tt") %>% 
+  left_join(transform_codes, by = c("series_id")) %>% 
+  group_by(series_id) %>% 
+  mutate(impulse_trans = case_when(transform_code == 2 ~ cumsum(impulse),
+                                   transform_code == 4 ~ exp(impulse)-1,
+                                   transform_code == 5 ~ exp(cumsum(impulse))-1,
+                                   TRUE ~ impulse),
+         sd = sd(impulse_trans), 
+         upper = impulse_trans + 1.96*sd,
+         lower = impulse_trans - 1.96*sd) %>%
+  ungroup() %>% 
+  select(tt, series_id, impulse_trans, upper, lower) %>% 
+  gather("type", "value", -"series_id", -"tt") 
+
+bvar_shock.plot %>% 
+  ggplot(aes(tt, value, linetype = type)) + 
+  geom_line(size = 1 ) + 
+  geom_hline(yintercept = 0, size = 0.5, linetype = "dotted") +
+  scale_linetype_manual(values = c("solid", "dashed", "dashed")) +
+  facet_wrap(~series_id, scales = "free", ncol = 1) + 
+    xlab("Months") + ylab("") +
+  theme_pri() + theme(legend.position = "none")
+ggsave("figures/policydim.pdf")
+  
+```
+
+##### Real variables
+```{r}
+bvar_reals.plot <- bvar_impulse.plot %>% 
+  filter(series_id %in% reals) %>% 
+  # inner_join(bvar_lower.plot, by = c("tt", "series_id")) %>%
+  # inner_join(bvar_upper.plot, by = c("tt", "series_id")) %>%
+  gather(type, value, -series_id, -tt) %>% 
+  left_join(description, by = c("series_id"="fred_code")) 
+  
+bvar_reals.plot %>% 
+  ggplot(aes(tt, value, linetype = type)) + 
+  geom_line(size = 1) + 
+  geom_hline(yintercept = 0, size = 0.5, linetype = "dotted") +
+  scale_linetype_manual(values = c("solid", "dashed", "dashed")) +
+  facet_wrap(~short_title, scales = "free", ncol = 3) + 
+  xlab("Months") + ylab("") + 
+  # ggtitle("Real variables") +
+  theme_pri() + theme(legend.position = "none")
+ggsave("figures/reals.pdf")
+
+```
+
+##### Markets
+```{r}
+bvar_markets.plot <- bvar_impulse.plot %>% 
+  filter(series_id %in% markets) %>% 
+  # inner_join(bvar_lower.plot, by = c("tt", "series_id")) %>%
+  # inner_join(bvar_upper.plot, by = c("tt", "series_id")) %>%
+  gather(type, value, -series_id, -tt) %>% 
+  left_join(description, by = c("series_id"="fred_code"))
+  
+bvar_markets.plot %>% 
+  ggplot(aes(tt, value, linetype = type)) + 
+  geom_line(size = 1) + 
+  geom_hline(yintercept = 0, size = 0.5, linetype = "dotted") +
+  scale_linetype_manual(values = c("solid", "dashed", "dashed")) +
+  facet_wrap(~short_title, scales = "free", ncol = 3) + 
+  xlab("Months") + ylab("") + 
+  # ggtitle("Market Reactions") +
+  theme_pri()+ theme(legend.position = "none")
+ggsave("figures/markets.pdf")
+
+```
+
+##### Yields
+```{r}
+bvar_yields.plot <- bvar_impulse.plot %>% 
+  filter(series_id %in% yields) %>% 
+  # inner_join(fvar_lower.plot, by = c("tt", "series_id")) %>% 
+  # inner_join(fvar_upper.plot, by = c("tt", "series_id")) %>% 
+  gather(type, value, -series_id, -tt) %>% 
+  left_join(description, by = c("series_id"="fred_code"))
+   
+bvar_yields.plot %>% 
+  ggplot(aes(tt, value, linetype = type)) + 
+  geom_line(size = 1) + 
+  geom_hline(yintercept = 0, size = 0.5, linetype = "dotted") +
+  scale_linetype_manual(values = c("solid", "dashed", "dashed")) +
+  facet_wrap(~short_title, scales = "free") + 
+  xlab("Months") + ylab("") + 
+  # ggtitle("Yields") +
+  theme_pri()+ theme(legend.position = "none")
+ggsave("figures/yields.pdf")
+
+```
